@@ -133,6 +133,47 @@ func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
 	v.Set("Signature", string(signature))
 }
 
+// Create an HIT
+func CreateHIT(auth aws.Auth, title string, description string, questionForm QuestionForm, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) ([]byte, error) {
+	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
+	const service = "AWSMechanicalTurkRequester"
+	const operation = "CreateHIT"
+
+	t := time.Now()
+
+	timestamp := t.Format(time.RFC3339)
+
+	v := url.Values{}
+	v.Set("AWSAccessKeyId", auth.AccessKey) //TODO set this
+	v.Set("Version", "2012-03-25")
+	v.Set("Operation", operation)
+	v.Set("Description", description)
+	v.Set("Timestamp", timestamp)
+	v.Set("Title", title)
+	v.Set("Question", questionForm.XML())
+	v.Set("LifetimeInSeconds", strconv.Itoa(lifetime))
+	v.Set("Reward.1.Amount", rewardAmount)
+	v.Set("Reward.1.CurrencyCode", rewardCurrencyCode)
+	v.Set("AssignmentDurationInSeconds", strconv.Itoa(assignmentDuration))
+	v.Set("Keywords", strings.Join(keywords, ","))
+	v.Set("AutoApprovalDelayInSeconds", strconv.Itoa(autoApprovalDelay))
+	v.Set("RequesterAnnotation", requesterAnnotation)
+	v.Set("UniqueRequestToken", uniqueRequestToken)
+	v.Set("ResponseGroup", responseGroup)
+
+	sign(auth, service, operation, timestamp, v)
+
+	resp, err := http.PostForm(QUERY_URL, v)
+	if err != nil {
+		panic(err)
+	}
+	bts, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
+	return bts, err
+}
+
 func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
 	auth, err := aws.EnvAuth()
 	if err != nil {
