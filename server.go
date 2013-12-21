@@ -5,12 +5,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
 	"github.com/ChimeraCoder/anaconda"
-	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	"io/ioutil"
 	"launchpad.net/goamz/aws"
@@ -21,7 +19,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 )
 
@@ -53,14 +50,10 @@ const (
 )
 
 type QuestionForm struct {
-	XMLName  xml.Name `xml:"QuestionForm"`
-	Xmlns    string   `xml:"xmlns,attr"`
+	XMLName xml.Name `xml:"QuestionForm"`
+	Xmlns   string   `xml:"xmlns,attr"`
 	//Overview string   `xml:"Overview"`
 	Question Question
-}
-
-type XMLEntity interface {
-	XML() string
 }
 
 func (qf QuestionForm) XML() string {
@@ -78,35 +71,16 @@ func (qf QuestionForm) XML() string {
 	return string(result)
 }
 
-type _Price struct {
-	price mturk.Price
-}
-
-func (p _Price) XML() string {
-	bs := make([]byte, 0, MAX_QUESTION_SIZE)
-	bf := bytes.NewBuffer(bs)
-	enc := xml.NewEncoder(bf)
-	enc.Indent("  ", "    ")
-	if err := enc.Encode(p.price); err != nil {
-		fmt.Printf("error: %v\n", err)
-	}
-	result, err := ioutil.ReadAll(bf)
-	if err != nil {
-		panic(err)
-	}
-	return string(result)
-}
-
 type Question struct {
 	QuestionIdentifier  string              `xml:"QuestionIdentifier"`
 	DisplayName         string              `xml:"DisplayName"`
 	IsRequired          bool                `xml:"IsRequired"`
-	QuestionContent     QuestionContent `xml:"QuestionContent"`
+	QuestionContent     QuestionContent     `xml:"QuestionContent"`
 	AnswerSpecification AnswerSpecification `xml:"AnswerSpecification",omitempty`
 }
 
-type QuestionContent struct{
-    Text string `xml:"Text"`
+type QuestionContent struct {
+	Text string `xml:"Text"`
 }
 
 type AnswerSpecification struct {
@@ -137,65 +111,6 @@ type HIT struct {
 	HitStatus    string
 }
 
-func renderTemplate(w http.ResponseWriter, name string, data interface{}, filenames ...string) {
-	s1, _ := template.ParseFiles(filenames...)
-	s1.ExecuteTemplate(w, name, data)
-}
-
-func serveHome(w http.ResponseWriter, r *http.Request) {
-	s1, _ := template.ParseFiles("templates/base.tmpl", "templates/index.tmpl")
-	s1.ExecuteTemplate(w, "base", nil)
-}
-
-func serveJson(w http.ResponseWriter, r *http.Request, data interface{}) {
-	bts, err := json.Marshal(data)
-	if err != nil {
-		panic(err)
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	fmt.Fprintf(w, string(bts))
-}
-
-// serveTweetTranslation serves a form for translating a tweet
-// it should never need to be called except by Amazon for rendering the task
-func serveTweetTranslation(w http.ResponseWriter, r *http.Request) {
-
-	vars := mux.Vars(r)
-	tweetId := vars["id"]
-	log.Printf("Tweet id is %s", tweetId)
-
-	hitId := r.FormValue("hitId")
-	assignmentId := r.FormValue("assignmentId")
-	log.Print(hitId, assignmentId)
-
-	i, err := strconv.ParseInt(tweetId, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-
-	/*
-	   a := anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
-
-	   log.Print("Fetching tweet")
-	   tweet, err  := a.GetTweet(i, nil)
-	   if err != nil{
-	       panic(err)
-	   }
-	   log.Print("Fetched tweet")
-	*/
-	//TODO undo this
-	tweet := anaconda.Tweet{}
-	tweet.Text = "test text"
-	tweet.Id = i
-	tweet.Id_str = "414080747603906560"
-
-	s1, err := template.ParseFiles("templates/base.tmpl", "templates/tweet.tmpl")
-	if err != nil {
-		panic(err)
-	}
-	s1.ExecuteTemplate(w, "base", map[string]interface{}{"Tweet": tweet, "assignmentId": assignmentId})
-}
-
 func queueTranslationHIT(tweetId int64) {
 	eq := mturk.ExternalQuestion{xml.Name{}, *DOMAIN + fmt.Sprintf("/translate/tweets/%s", tweetId), FRAME_HEIGHT}
 	log.Print(eq)
@@ -215,22 +130,22 @@ func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
 	hash.Write([]byte(payload))
 	signature := make([]byte, b64.EncodedLen(hash.Size()))
 	b64.Encode(signature, hash.Sum(nil))
-    v.Set("Signature", string(signature))
+	v.Set("Signature", string(signature))
 }
 
 func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
-    auth, err := aws.EnvAuth()
-    if err != nil {
-        panic(err)
-    }
+	auth, err := aws.EnvAuth()
+	if err != nil {
+		panic(err)
+	}
 
-    log.Print("About to request tweet")
+	log.Print("About to request tweet")
 
-    tweet, err := a.GetTweet(414197411058573312, nil)
-    if err != nil{
-        panic(err)
-    }
-    log.Print("Successfully fetched tweet %s", tweet.Text)
+	tweet, err := a.GetTweet(414197411058573312, nil)
+	if err != nil {
+		panic(err)
+	}
+	log.Print("Successfully fetched tweet %s", tweet.Text)
 
 	answerSpecification := AnswerSpecification{FreeTextAnswer{Constraints{Length{1, 140}}, "", 1}}
 	question := Question{tweet.Id_str, "Translating tweets into Emoji", true, QuestionContent{tweet.Text}, answerSpecification}
@@ -240,12 +155,11 @@ func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
 
 	//reward := _Price{mturk.Price{"0.25", "USD", ""}}
 
-    hit_description := "Please pick the emoji that would provide the best translation of this tweet"
-    hit_title := "Translation of tweet into emoji"
+	hit_description := "Please pick the emoji that would provide the best translation of this tweet"
+	hit_title := "Translation of tweet into emoji"
 
-
-    service := "AWSMechanicalTurkRequester"
-    operation := "CreateHIT"
+	service := "AWSMechanicalTurkRequester"
+	operation := "CreateHIT"
 
 	t := time.Now()
 
@@ -257,12 +171,11 @@ func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
 	v.Set("Operation", operation)
 	v.Set("Description", hit_description)
 	v.Set("Timestamp", timestamp)
-    v.Set("Title", hit_title)
+	v.Set("Title", hit_title)
 	v.Set("Question", qf.XML())
 	v.Set("LifetimeInSeconds", strconv.Itoa(LIFETIME))
-	//v.Set("Reward", reward.XML())
-    v.Set("Reward.1.Amount", "0.25")
-    v.Set("Reward.1.CurrencyCode", "USD")
+	v.Set("Reward.1.Amount", "0.25")
+	v.Set("Reward.1.CurrencyCode", "USD")
 	v.Set("AssignmentDurationInSeconds", strconv.Itoa(ASSIGNMENT_DURATION))
 	v.Set("LifetimeInSeconds", strconv.Itoa(LIFETIME))
 	v.Set("Keywords", strings.Join(HIT_KEYWORDS, ","))
@@ -271,41 +184,28 @@ func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
 	v.Set("UniqueRequestToken", tweet.Id_str)
 	v.Set("ResponseGroup", "Minimal")
 
-    sign(auth, service, operation, timestamp, v)
+	sign(auth, service, operation, timestamp, v)
 
+	log.Printf("Values are %+v", v)
+	resp, err := http.PostForm(QUERY_URL, v)
+	if err != nil {
+		panic(err)
+	}
+	bts, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
 
-    log.Printf("Values are %+v", v)
-    resp, err := http.PostForm(QUERY_URL, v)
-    if err != nil{
-        panic(err)
-    }
-    bts, err := ioutil.ReadAll(resp.Body)
-    if err != nil{
-        panic(err)
-    }
-
-    log.Print(string(bts))
-
+	log.Print(string(bts))
 
 	return &qf
 }
 
 func main() {
-    anaconda.SetConsumerKey(string(TWITTER_CONSUMER_KEY))
-    anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
+	anaconda.SetConsumerKey(string(TWITTER_CONSUMER_KEY))
+	anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
 
 	a := anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
 	qf := CreateTranslationHIT(a)
 	log.Print(qf)
-
-	r := mux.NewRouter()
-
-	r.HandleFunc("/", serveHome)
-	r.HandleFunc("/translate/tweets/{id}", serveTweetTranslation)
-	http.Handle("/static/", http.FileServer(http.Dir("public")))
-	http.Handle("/", r)
-
-	if err := http.ListenAndServe(*httpAddr, nil); err != nil {
-		log.Fatalf("Error listening, %v", err)
-	}
 }
