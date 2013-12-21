@@ -10,7 +10,6 @@ import (
 	"github.com/ChimeraCoder/anaconda"
 	"io/ioutil"
 	"launchpad.net/goamz/aws"
-	"launchpad.net/goamz/exp/mturk"
 	"log"
 	"net/http"
 	"net/url"
@@ -118,6 +117,28 @@ type CreateHITResponse struct {
 	}
 }
 
+type SearchHITsResponse struct {
+	XMLName xml.Name `xml:"SearchHITsResponse"`
+	Request struct {
+		IsValid bool
+	}
+	NumResults      int
+	TotalNumResults int
+	PageNumber      int
+	HIT             []struct {
+		HITId                        string
+		HITTypeId                    string
+		CreationTime                 string
+		Title                        string
+		Description                  string
+		HITStatus                    string
+		Expiration                   string
+		NumberOfAssignmentsPending   string
+		NumberOfAssignmentsAvailable string
+		NumberOfAssignmentsCompleted string
+	}
+}
+
 func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
 	b64 := base64.StdEncoding
 	payload := service + method + timestamp
@@ -167,7 +188,42 @@ func CreateHIT(auth aws.Auth, title string, description string, questionForm Que
 		return nil, err
 	}
 
+	log.Printf("Result was %s\n\n", string(bts))
 	var result CreateHITResponse
+	err = xml.Unmarshal(bts, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func SearchHIT(auth aws.Auth, v url.Values) (*SearchHITsResponse, error) {
+	const OPERATION = "SearchHITs"
+	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
+	const SERVICE = "AWSMechanicalTurkRequester"
+	if v == nil {
+		v = url.Values{}
+	}
+
+	timestamp := time.Now().Format(time.RFC3339)
+	v.Set("AWSAccessKeyId", auth.AccessKey)
+	v.Set("Operation", OPERATION)
+	v.Set("Timestamp", timestamp)
+	v.Set("AWSAccessKeyId", auth.AccessKey)
+
+	sign(auth, SERVICE, OPERATION, timestamp, v)
+
+	resp, err := http.PostForm(QUERY_URL, v)
+	if err != nil {
+		return nil, err
+	}
+	bts, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("Result was %s\n\n", string(bts))
+	var result SearchHITsResponse
 	err = xml.Unmarshal(bts, &result)
 	if err != nil {
 		return nil, err
@@ -214,21 +270,34 @@ func main() {
 	anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
 	a := anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
 
-	resp, err := CreateTranslationHIT(auth, a, 414194572374204416, "Pick Emoji that translate a tweet", "Pick the emoji that you feel would be the best translation of this tweet. For example: 'Call me Ishmael' might be translated as '☎ 👨 ⛵ 🐳 📌'", "Please translate this tweet", "0.25", 120, 1200, HIT_KEYWORDS, 0)
+	//foo := "Pick the emoji that you feel would be the best translation of this tweet. For example: 'Call me Ishmael' might be translated as '☎ 👨 ⛵ 🐳 📌'"
 
-	hitId := resp.HIT.HITId
+	resp, err := CreateTranslationHIT(auth, a, 414423434295529472, "Pick Emoji that translate a tweet", "Pick the emoji that you feel would be the best translation of this tweet. For example, 'Call me' might be translated as <img src=\"http://www.emojidick.com/emoji.png\">", "Please translate this tweet", "0.25", 120, 1200, HIT_KEYWORDS, 0)
 
-	<-time.After(5 * time.Second)
-	mt := mturk.New(auth)
-
-	// TODO expand this to work for more than 100 simultaneous outstanding tasks
-	hitsSearch, err := mt.SearchHITs()
 	if err != nil {
 		panic(err)
 	}
-	for _, hit := range hitsSearch.HITs {
+
+	//hitId := resp.HIT.HITId
+	hitId := "075a0e2d-c0cb-4577-916d-2cfe20047f42"
+	log.Print(resp)
+	log.Printf("hitId is %s", hitId)
+
+	<-time.After(5 * time.Second)
+
+	// TODO expand this to work for more than 100 simultaneous outstanding tasks
+	//hitsSearch, err := mt.SearchHITs()
+	hitsSearch, err := SearchHIT(auth, nil)
+	if err != nil {
+		panic(err)
+	}
+	for _, hit := range hitsSearch.HIT {
 		if hit.HITId == hitId {
-			log.Printf("Status of HIT %s is %s", hitId, hit.HITReviewStatus)
+			log.Printf(">>>>>>Status of HIT %s is %s", hitId, hit.NumberOfAssignmentsCompleted)
+		} else {
+			log.Printf("Received %v", hit)
 		}
 	}
+	log.Printf("Length is %d", len(hitsSearch.HIT))
+	log.Printf("Received %+v", hitsSearch)
 }
