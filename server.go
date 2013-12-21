@@ -111,6 +111,20 @@ type HIT struct {
 	HitStatus    string
 }
 
+type CreateHITResponse struct {
+	XMLName          xml.Name `xml:"CreateHITResponse"`
+	OperationRequest struct {
+		RequestId string
+	}
+	HIT struct {
+		Request struct {
+			IsValid bool
+		}
+		HITId     string
+		HITTypeId string
+	}
+}
+
 func queueTranslationHIT(tweetId int64) {
 	eq := mturk.ExternalQuestion{xml.Name{}, *DOMAIN + fmt.Sprintf("/translate/tweets/%s", tweetId), FRAME_HEIGHT}
 	log.Print(eq)
@@ -134,7 +148,7 @@ func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
 }
 
 // Create an HIT
-func CreateHIT(auth aws.Auth, title string, description string, questionForm QuestionForm, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) ([]byte, error) {
+func CreateHIT(auth aws.Auth, title string, description string, questionForm QuestionForm, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const service = "AWSMechanicalTurkRequester"
 	const operation = "CreateHIT"
@@ -165,13 +179,19 @@ func CreateHIT(auth aws.Auth, title string, description string, questionForm Que
 
 	resp, err := http.PostForm(QUERY_URL, v)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	bts, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return bts, err
+
+	var result CreateHITResponse
+	err = xml.Unmarshal(bts, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
