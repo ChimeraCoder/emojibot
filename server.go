@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -33,6 +34,7 @@ var (
 
 const (
 	QUESTION_FORM_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2005-10-01/QuestionForm.xsd"
+	HTML_QUESTION_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd"
 	FRAME_HEIGHT             = 100  // Frame height of the ExternalQuestion for MTurk, in pixels.
 	ASSIGNMENT_DURATION      = 600  // How long, in seconds, a worker has to complete the assignment
 	LIFETIME                 = 1200 // How long, in seconds, before the task expires
@@ -40,6 +42,72 @@ const (
 	AUTO_APPROVAL_DELAY      = 0    // Seconds before the request is auto-accepted. Set to 0 to accept immediately
 	MAX_QUESTION_SIZE        = 65535
 )
+
+type HTMLQuestion struct {
+	XMLName     xml.Name            `xml:"HTMLQuestion"`
+	Xmlns       string              `xml:"xmlns,attr"`
+	HTMLContent HTMLQuestionContent `xml:"HTMLContent"`
+	FrameHeight int                 `xml:"FrameHeight"`
+}
+
+func (hq HTMLQuestion) XML() string {
+	bs := make([]byte, 0, MAX_QUESTION_SIZE)
+	bf := bytes.NewBuffer(bs)
+	enc := xml.NewEncoder(bf)
+	enc.Indent("  ", "    ")
+	if err := enc.Encode(hq); err != nil {
+		fmt.Printf("error: %v\n", err)
+	}
+	result, err := ioutil.ReadAll(bf)
+	if err != nil {
+		panic(err)
+	}
+	return string(result)
+}
+
+type HTMLQuestionContent struct {
+	AssignmentId string
+	Title        string
+	Description  string
+	ImageUrl     string
+	Tweet        anaconda.Tweet
+	TweetEmbed   anaconda.OEmbed
+}
+
+const HTMLQuestionTemplate = `{{define "T"}}<HTMLQuestion xmlns="http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd">
+  <HTMLContent><![CDATA[
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+<script type="text/javascript" src="https://s3.amazonaws.com/mturk-public/externalHIT_v1.js"></script>
+</head>
+<body>
+<form name="mturk_form" method="post" id="mturk_form" action="https://www.mturk.com/mturk/externalSubmit">
+<input type="hidden" value="" name="{{.AssignmentId}}" id="{{.AssignmentId}}"/>
+<h2>{{.Title}}</h2>
+<div style="border: 2px #000000 solid">
+<h4>
+{{.TweetEmbed.Html}}
+</h4>
+</div>
+<div>
+Pick the emoji that you feel would be the best translation of this tweet. For example, if the tweet were
+
+<blockquote class="twitter-tweet" lang="en"><p>Call me Ishmael</p>&mdash; Aditya Mukerjee (@chimeracoder) <a href="https://twitter.com/chimeracoder/statuses/412631000544333824">December 16, 2013</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+you might translate it as into the following emoji:
+    <img src="{{.ImageUrl}}">
+</div>
+<p><textarea name="comment" cols="80" rows="3"></textarea></p>
+<p><input type="submit" id="submitButton" value="Submit" /></p></form>
+<script language="Javascript">turkSetAssignmentID();</script>
+</body>
+</html>
+]]></HTMLContent>
+<FrameHeight>450</FrameHeight>
+</HTMLQuestion>{{end}}
+`
 
 type QuestionForm struct {
 	XMLName xml.Name `xml:"QuestionForm"`
@@ -150,7 +218,7 @@ func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
 }
 
 // Create an HIT
-func CreateHIT(auth aws.Auth, title string, description string, questionForm QuestionForm, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
+func CreateHIT(auth aws.Auth, title string, description string, htmlQuestionContent HTMLQuestionContent, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const service = "AWSMechanicalTurkRequester"
 	const operation = "CreateHIT"
@@ -159,6 +227,26 @@ func CreateHIT(auth aws.Auth, title string, description string, questionForm Que
 
 	timestamp := t.Format(time.RFC3339)
 
+	bs := make([]byte, 0, MAX_QUESTION_SIZE)
+	bf := bytes.NewBuffer(bs)
+	tmpl, err := template.New("foo").Parse(HTMLQuestionTemplate)
+	if err != nil {
+		panic(err)
+		return nil, err
+	}
+	err = tmpl.ExecuteTemplate(bf, "T", htmlQuestionContent)
+	if err != nil {
+		panic(err)
+		return nil, err
+	}
+
+	bts, err := ioutil.ReadAll(bf)
+	if err != nil {
+		panic(err)
+		return nil, err
+	}
+
+	log.Printf("Bts are %s", string(bts))
 	v := url.Values{}
 	v.Set("AWSAccessKeyId", auth.AccessKey) //TODO set this
 	v.Set("Version", "2012-03-25")
@@ -166,7 +254,8 @@ func CreateHIT(auth aws.Auth, title string, description string, questionForm Que
 	v.Set("Description", description)
 	v.Set("Timestamp", timestamp)
 	v.Set("Title", title)
-	v.Set("Question", questionForm.XML())
+	//v.Set("Question", hq.XML())
+	v.Set("Question", string(bts))
 	v.Set("LifetimeInSeconds", strconv.Itoa(lifetime))
 	v.Set("Reward.1.Amount", rewardAmount)
 	v.Set("Reward.1.CurrencyCode", rewardCurrencyCode)
@@ -183,7 +272,7 @@ func CreateHIT(auth aws.Auth, title string, description string, questionForm Que
 	if err != nil {
 		return nil, err
 	}
-	bts, err := ioutil.ReadAll(resp.Body)
+	bts, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -249,14 +338,16 @@ func CreateTranslationHIT(auth aws.Auth, a *anaconda.TwitterApi, tweetId int64, 
 	if err != nil {
 		panic(err)
 	}
+	embed, err := a.GetOEmbedId(tweetId, nil)
+	if err != nil {
+		panic(err)
+	}
 
 	log.Print("Successfully obtained tweet")
 
-	answerSpecification := AnswerSpecification{FreeTextAnswer{Constraints{Length{1, 140}}, "", 1}}
-	question := Question{tweet.Id_str, displayName, true, QuestionContent{tweet.Text}, answerSpecification}
-	questionForm := QuestionForm{Xmlns: QUESTION_FORM_SCHEMA_URL, Question: question}
+	hq := HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
 
-	resp, err := CreateHIT(auth, title, description, questionForm, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
+	resp, err := CreateHIT(auth, title, description, hq, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str+time.Now().String(), responseGroup)
 	return resp, err
 }
 
@@ -270,16 +361,17 @@ func main() {
 	anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
 	a := anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
 
-	//foo := "Pick the emoji that you feel would be the best translation of this tweet. For example: 'Call me Ishmael' might be translated as '☎ 👨 ⛵ 🐳 📌'"
+	title := `Translate tweet into emoji`
+	description := `Pick the emoji that you feel would be the best translation of this tweet.`
+	displayName := "How would you translate this tweet?"
 
-	resp, err := CreateTranslationHIT(auth, a, 414423434295529472, "Pick Emoji that translate a tweet", "Pick the emoji that you feel would be the best translation of this tweet. For example, 'Call me' might be translated as <img src=\"http://www.emojidick.com/emoji.png\">", "Please translate this tweet", "0.25", 120, 1200, HIT_KEYWORDS, 0)
+	resp, err := CreateTranslationHIT(auth, a, 412631000544333824, title, description, displayName, "0.15", 120, 1200, HIT_KEYWORDS, 0)
 
 	if err != nil {
 		panic(err)
 	}
 
-	//hitId := resp.HIT.HITId
-	hitId := "075a0e2d-c0cb-4577-916d-2cfe20047f42"
+	hitId := resp.HIT.HITId
 	log.Print(resp)
 	log.Printf("hitId is %s", hitId)
 
