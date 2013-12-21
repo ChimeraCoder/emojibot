@@ -6,10 +6,8 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/xml"
-	"flag"
 	"fmt"
 	"github.com/ChimeraCoder/anaconda"
-	"github.com/gorilla/sessions"
 	"io/ioutil"
 	"launchpad.net/goamz/aws"
 	"launchpad.net/goamz/exp/mturk"
@@ -23,16 +21,11 @@ import (
 )
 
 var (
-	httpAddr            = flag.String("addr", ":8000", "HTTP server address")
-	baseTmpl     string = "templates/base.tmpl"
-	store               = sessions.NewCookieStore([]byte(COOKIE_SECRET)) //CookieStore uses secure cookies
-	DOMAIN              = flag.String("domain", "", "The domain name where the site is being served")
-	HIT_KEYWORDS        = []string{"twitter", "emoji"}
+	HIT_KEYWORDS = []string{"twitter", "emoji"}
 
-	//The following three variables can be defined using environment variables
+	//The following variables can be defined using environment variables
 	//to avoid committing them by mistake
 
-	COOKIE_SECRET               = []byte(os.Getenv("COOKIE_SECRET"))
 	TWITTER_CONSUMER_KEY        = []byte(os.Getenv("TWITTER_CONSUMER_KEY"))
 	TWITTER_CONSUMER_SECRET     = []byte(os.Getenv("TWITTER_CONSUMER_SECRET"))
 	TWITTER_ACCESS_TOKEN        = []byte(os.Getenv("TWITTER_ACCESS_TOKEN"))
@@ -125,18 +118,6 @@ type CreateHITResponse struct {
 	}
 }
 
-func queueTranslationHIT(tweetId int64) {
-	eq := mturk.ExternalQuestion{xml.Name{}, *DOMAIN + fmt.Sprintf("/translate/tweets/%s", tweetId), FRAME_HEIGHT}
-	log.Print(eq)
-	type Price struct {
-		Amount         string
-		CurrencyCode   string
-		FormattedPrice string
-	}
-
-	//ht, err := mt.CreateHIT("Translate Tweet into Emoji", "Please pick the emoji that best describe the following tweet", eq ExternalQuestion, reward, ASSIGNMENT_DURATION, LIFETIME, strings.Join(",", HIT_KEYWORDS), MAX_ASSIGNMENTS, nil)
-}
-
 func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
 	b64 := base64.StdEncoding
 	payload := service + method + timestamp
@@ -194,7 +175,13 @@ func CreateHIT(auth aws.Auth, title string, description string, questionForm Que
 	return &result, nil
 }
 
-func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
+func CreateTranslationHIT(auth aws.Auth, a *anaconda.TwitterApi, tweetId int64, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int) (*CreateHITResponse, error) {
+	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
+	const service = "AWSMechanicalTurkRequester"
+	const operation = "CreateHIT"
+	const rewardCurrencyCode = "USD" // This is the only one supported for now by Amazon, anyway
+	const responseGroup = "Minimal"
+
 	auth, err := aws.EnvAuth()
 	if err != nil {
 		panic(err)
@@ -202,71 +189,46 @@ func CreateTranslationHIT(a *anaconda.TwitterApi) *QuestionForm {
 
 	log.Print("About to request tweet")
 
-	tweet, err := a.GetTweet(414197411058573312, nil)
+	tweet, err := a.GetTweet(tweetId, nil)
 	if err != nil {
 		panic(err)
 	}
-	log.Print("Successfully fetched tweet %s", tweet.Text)
+
+	log.Print("Successfully obtained tweet")
 
 	answerSpecification := AnswerSpecification{FreeTextAnswer{Constraints{Length{1, 140}}, "", 1}}
-	question := Question{tweet.Id_str, "Translating tweets into Emoji", true, QuestionContent{tweet.Text}, answerSpecification}
-	qf := QuestionForm{Xmlns: QUESTION_FORM_SCHEMA_URL, Question: question}
+	question := Question{tweet.Id_str, displayName, true, QuestionContent{tweet.Text}, answerSpecification}
+	questionForm := QuestionForm{Xmlns: QUESTION_FORM_SCHEMA_URL, Question: question}
 
-	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
-
-	//reward := _Price{mturk.Price{"0.25", "USD", ""}}
-
-	hit_description := "Please pick the emoji that would provide the best translation of this tweet"
-	hit_title := "Translation of tweet into emoji"
-
-	service := "AWSMechanicalTurkRequester"
-	operation := "CreateHIT"
-
-	t := time.Now()
-
-	timestamp := t.Format(time.RFC3339)
-
-	v := url.Values{}
-	v.Set("AWSAccessKeyId", auth.AccessKey) //TODO set this
-	v.Set("Version", "2012-03-25")
-	v.Set("Operation", operation)
-	v.Set("Description", hit_description)
-	v.Set("Timestamp", timestamp)
-	v.Set("Title", hit_title)
-	v.Set("Question", qf.XML())
-	v.Set("LifetimeInSeconds", strconv.Itoa(LIFETIME))
-	v.Set("Reward.1.Amount", "0.25")
-	v.Set("Reward.1.CurrencyCode", "USD")
-	v.Set("AssignmentDurationInSeconds", strconv.Itoa(ASSIGNMENT_DURATION))
-	v.Set("LifetimeInSeconds", strconv.Itoa(LIFETIME))
-	v.Set("Keywords", strings.Join(HIT_KEYWORDS, ","))
-	v.Set("AutoApprovalDelayInSeconds", strconv.Itoa(AUTO_APPROVAL_DELAY))
-	v.Set("RequesterAnnotation", tweet.Id_str)
-	v.Set("UniqueRequestToken", tweet.Id_str)
-	v.Set("ResponseGroup", "Minimal")
-
-	sign(auth, service, operation, timestamp, v)
-
-	log.Printf("Values are %+v", v)
-	resp, err := http.PostForm(QUERY_URL, v)
-	if err != nil {
-		panic(err)
-	}
-	bts, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		panic(err)
-	}
-
-	log.Print(string(bts))
-
-	return &qf
+	resp, err := CreateHIT(auth, title, description, questionForm, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
+	return resp, err
 }
 
 func main() {
+
+	auth, err := aws.EnvAuth()
+	if err != nil {
+		panic(err)
+	}
 	anaconda.SetConsumerKey(string(TWITTER_CONSUMER_KEY))
 	anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
-
 	a := anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
-	qf := CreateTranslationHIT(a)
-	log.Print(qf)
+
+	resp, err := CreateTranslationHIT(auth, a, 414194572374204416, "Pick Emoji that translate a tweet", "Pick the emoji that you feel would be the best translation of this tweet. For example: 'Call me Ishmael' might be translated as '☎ 👨 ⛵ 🐳 📌'", "Please translate this tweet", "0.25", 120, 1200, HIT_KEYWORDS, 0)
+
+	hitId := resp.HIT.HITId
+
+	<-time.After(5 * time.Second)
+	mt := mturk.New(auth)
+
+	// TODO expand this to work for more than 100 simultaneous outstanding tasks
+	hitsSearch, err := mt.SearchHITs()
+	if err != nil {
+		panic(err)
+	}
+	for _, hit := range hitsSearch.HITs {
+		if hit.HITId == hitId {
+			log.Printf("Status of HIT %s is %s", hitId, hit.HITReviewStatus)
+		}
+	}
 }
