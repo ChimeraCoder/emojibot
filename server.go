@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -42,12 +40,13 @@ const (
 	QUESTION_FORM_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2005-10-01/QuestionForm.xsd"
 	HTML_QUESTION_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd"
 	FRAME_HEIGHT             = 100                // Frame height of the ExternalQuestion for MTurk, in pixels.
-	ASSIGNMENT_DURATION      = 600                // How long, in seconds, a worker has to complete the assignment
+	ASSIGNMENT_DURATION      = 300                // How long, in seconds, a worker has to complete the assignment
 	LIFETIME                 = 1200 * time.Second // How long, in seconds, before the task expires
 	MAX_ASSIGNMENTS          = 1                  // Number of times the task needs to be performed
 	AUTO_APPROVAL_DELAY      = 0                  // Seconds before the request is auto-accepted. Set to 0 to accept immediately
 	MAX_QUESTION_SIZE        = 65535
 	HITTYPE_ID               = "2KZXBAT2D5NQ20NW5CRJO5TYMZL26K"
+	REWARD                   = "0.15"
 )
 
 func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
@@ -58,26 +57,6 @@ func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
 	signature := make([]byte, b64.EncodedLen(hash.Size()))
 	b64.Encode(signature, hash.Sum(nil))
 	v.Set("Signature", string(signature))
-}
-
-func sign2(auth aws.Auth, method, path string, params url.Values, host string) {
-	b64 := base64.StdEncoding
-	params.Set("AWSAccessKeyId", auth.AccessKey)
-	params.Set("SignatureVersion", "2")
-	params.Set("SignatureMethod", "HmacSHA256")
-
-	var sarray []string
-	for k, v := range params {
-		sarray = append(sarray, aws.Encode(k)+"="+aws.Encode(v[0]))
-	}
-	sort.StringSlice(sarray).Sort()
-	joined := strings.Join(sarray, "&")
-	payload := method + "\n" + host + "\n" + path + "\n" + joined
-	hash := hmac.New(sha256.New, []byte(auth.SecretKey))
-	hash.Write([]byte(payload))
-	signature := make([]byte, b64.EncodedLen(hash.Size()))
-	b64.Encode(signature, hash.Sum(nil))
-	params.Set("Signature", string(signature))
 }
 
 func GetAssignmentsForHITOperation(hitID string) (*GetAssignmentsForHITResponse, error) {
@@ -147,12 +126,11 @@ func CreateHIT(title string, description string, htmlQuestionContent HTMLQuestio
 	v.Set("AWSAccessKeyId", awsAuth.AccessKey) //TODO set this
 	v.Set("Version", "2012-03-25")
 	v.Set("Operation", operation)
-	v.Set("HITTypeId", HITTYPE_ID)
 	v.Set("Description", description)
 	v.Set("Timestamp", timestamp)
 	v.Set("Title", title)
 	v.Set("Question", string(bts))
-	v.Set("LifetimeInSeconds", strconv.Itoa(int(lifetime)))
+	v.Set("LifetimeInSeconds", strconv.Itoa(int(lifetime.Seconds())))
 	v.Set("Reward.1.Amount", rewardAmount)
 	v.Set("Reward.1.CurrencyCode", rewardCurrencyCode)
 	v.Set("AssignmentDurationInSeconds", strconv.Itoa(assignmentDuration))
@@ -179,7 +157,12 @@ func CreateHIT(title string, description string, htmlQuestionContent HTMLQuestio
 	if err != nil {
 		return nil, err
 	}
-	return &result, nil
+
+	if !result.HIT.Request.IsValid {
+		err = fmt.Errorf("CreateHITResponse contained an invalid response")
+	}
+
+	return &result, err
 }
 
 func SetHITTypeNotification(hitTypeId string, notification Notification) (*SearchHITsResponse, error) {
@@ -187,42 +170,6 @@ func SetHITTypeNotification(hitTypeId string, notification Notification) (*Searc
 	const EVENT_TYPE = "AssignmentSubmitted"
 	//Notification{AWS_SQS_URL, "SQS", "2006-05-05", "AssignmentSubmitted"}
 	return nil, nil
-}
-
-// Receive at most one message from the queue
-func ReceiveMessage() (*ReceiveMessageResponse, error) {
-	QUERY_URL := AWS_SQS_URL
-	const ACTION = "ReceiveMessage"
-
-	timestamp := time.Now().Format(time.RFC3339)
-	v := url.Values{}
-	v.Set("Action", ACTION)
-	v.Set("MaxNumberOfMessages", "1")
-	v.Set("VisibilityTimeout", "15")
-	v.Set("AttributeName", "All")
-	v.Set("Timestamp", timestamp)
-	v.Set("Version", "2009-02-01")
-	v.Set("SignatureMethod", "HmacSHA1")
-	v.Set("AWSAccessKeyId", awsAuth.AccessKey)
-	v.Set("SignatureVersion", "2")
-
-	sign2(*awsAuth, "POST", "/899223851996/EmojibotQueue", v, "sqs.us-east-1.amazonaws.com")
-	resp, err := http.PostForm(QUERY_URL, v)
-	if err != nil {
-		return nil, err
-	}
-	bts, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Printf("Result was %s\n\n", string(bts))
-	var result ReceiveMessageResponse
-	err = xml.Unmarshal(bts, &result)
-	if err != nil {
-		return nil, err
-	}
-	return &result, nil
 }
 
 func SearchHIT(v url.Values) (*SearchHITsResponse, error) {
@@ -259,12 +206,13 @@ func SearchHIT(v url.Values) (*SearchHITsResponse, error) {
 	return &result, nil
 }
 
-func CreateTranslationHIT(a *anaconda.TwitterApi, tweetId int64, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string, autoApprovalDelay int) (*CreateHITResponse, error) {
+func CreateTranslationHIT(a *anaconda.TwitterApi, tweetId int64, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*CreateHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const service = "AWSMechanicalTurkRequester"
 	const operation = "CreateHIT"
 	const rewardCurrencyCode = "USD" // This is the only one supported for now by Amazon, anyway
 	const responseGroup = "Minimal"
+	const autoApprovalDelay = 0 // auto-approve immediately
 
 	log.Print("About to request tweet")
 
@@ -290,45 +238,45 @@ func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
 	title := `Translate tweet into emoji`
 	description := `Pick the emoji that you feel would be the best translation of this tweet.`
 	displayName := "How would you translate this tweet?"
-	hit, err := CreateTranslationHIT(twitterBot, tweet.Id, title, description, displayName, "0.15", 120, LIFETIME, HIT_KEYWORDS, 0)
+	hit, err := CreateTranslationHIT(twitterBot, tweet.Id, title, description, displayName, REWARD, ASSIGNMENT_DURATION, LIFETIME, HIT_KEYWORDS)
 	if err != nil {
 		log.Printf("ERROR creating translation HIT: %s", err)
 	}
 
 	// Check every minute for the completed task
 	hitId := hit.HIT.HITId
-	t := time.NewTicker(time.Minute)
-	timeout := make(chan bool, 1)
-	go func() {
-		time.After(LIFETIME)
-		timeout <- true
-	}()
+	ticker := time.NewTicker(time.Minute)
+	timeout := time.After(LIFETIME)
 	for {
+		log.Printf("Re-entering for loop")
 		select {
-		case <-t.C:
+		case <-ticker.C:
+			log.Printf("Fetching assignments for HITOperation")
 			result, err := GetAssignmentsForHITOperation(hitId)
 			if err != nil {
-				log.Printf("ERROR fetching assignments for HITOperation %s", hitId)
+				log.Printf("ERROR fetching assignments for HITOperation %s: %s", hitId, err)
 			}
 			answerText, err := result.GetAnswerText()
 			if err != nil {
-				log.Printf("ERROR getting text of response for HITOperation %s", hitId)
+				log.Printf("ERROR getting text of response for HITOperation %s: %s", hitId, err)
 			}
 			if answerText == "" {
+				log.Printf("Assignments yielded an empty response")
 				continue
 			}
+			log.Printf("Received answerText %s", answerText)
 			v := url.Values{}
 			v.Set("in_reply_to_status_id", tweet.Id_str)
-			err = twitterBot.PostTweet(fmt.Sprintf("%s %s", *tweet.User.Screen_name, answerText), v)
+			_, err = twitterBot.PostTweet(fmt.Sprintf("%s %s", *tweet.User.Screen_name, answerText), v)
 			if err != nil {
 				log.Printf("ERROR updating tweet %s: %s", tweet.Id_str, err)
 			}
 
 		case <-timeout:
+			log.Printf("Timing out :(")
 			return
 		}
 	}
-
 }
 
 func main() {
@@ -352,13 +300,16 @@ func main() {
 	for {
 		tweets, _ := twitterBot.GetHomeTimeline()
 		for _, tweet := range tweets {
-			if t, _ := tweet.CreatedAtTime(); time.Now().Add(-8*time.Hour).Before(t) && *tweet.User.Id != *me.Id {
+			if t, _ := tweet.CreatedAtTime(); time.Now().Add(-3*time.Hour).Before(t) && *tweet.User.Id != *me.Id {
 				log.Printf("Scheduling response to tweet %s", tweet.Text)
 				go ScheduleTranslatedTweet(tweet)
 			}
 		}
 
 		//TODO remove this
-		return
+		break
+	}
+	for {
+		<-time.After(time.Minute)
 	}
 }
