@@ -41,11 +41,11 @@ var (
 const (
 	QUESTION_FORM_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2005-10-01/QuestionForm.xsd"
 	HTML_QUESTION_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd"
-	FRAME_HEIGHT             = 100  // Frame height of the ExternalQuestion for MTurk, in pixels.
-	ASSIGNMENT_DURATION      = 600  // How long, in seconds, a worker has to complete the assignment
-	LIFETIME                 = 1200 // How long, in seconds, before the task expires
-	MAX_ASSIGNMENTS          = 1    // Number of times the task needs to be performed
-	AUTO_APPROVAL_DELAY      = 0    // Seconds before the request is auto-accepted. Set to 0 to accept immediately
+	FRAME_HEIGHT             = 100                // Frame height of the ExternalQuestion for MTurk, in pixels.
+	ASSIGNMENT_DURATION      = 600                // How long, in seconds, a worker has to complete the assignment
+	LIFETIME                 = 1200 * time.Second // How long, in seconds, before the task expires
+	MAX_ASSIGNMENTS          = 1                  // Number of times the task needs to be performed
+	AUTO_APPROVAL_DELAY      = 0                  // Seconds before the request is auto-accepted. Set to 0 to accept immediately
 	MAX_QUESTION_SIZE        = 65535
 	HITTYPE_ID               = "2KZXBAT2D5NQ20NW5CRJO5TYMZL26K"
 )
@@ -114,7 +114,7 @@ func GetAssignmentsForHITOperation(hitID string) (*GetAssignmentsForHITResponse,
 }
 
 // Create an HIT
-func CreateHIT(title string, description string, htmlQuestionContent HTMLQuestionContent, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
+func CreateHIT(title string, description string, htmlQuestionContent HTMLQuestionContent, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime time.Duration, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const service = "AWSMechanicalTurkRequester"
 	const operation = "CreateHIT"
@@ -152,7 +152,7 @@ func CreateHIT(title string, description string, htmlQuestionContent HTMLQuestio
 	v.Set("Timestamp", timestamp)
 	v.Set("Title", title)
 	v.Set("Question", string(bts))
-	v.Set("LifetimeInSeconds", strconv.Itoa(lifetime))
+	v.Set("LifetimeInSeconds", strconv.Itoa(int(lifetime)))
 	v.Set("Reward.1.Amount", rewardAmount)
 	v.Set("Reward.1.CurrencyCode", rewardCurrencyCode)
 	v.Set("AssignmentDurationInSeconds", strconv.Itoa(assignmentDuration))
@@ -259,7 +259,7 @@ func SearchHIT(v url.Values) (*SearchHITsResponse, error) {
 	return &result, nil
 }
 
-func CreateTranslationHIT(a *anaconda.TwitterApi, tweetId int64, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime int, keywords []string, autoApprovalDelay int) (*CreateHITResponse, error) {
+func CreateTranslationHIT(a *anaconda.TwitterApi, tweetId int64, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string, autoApprovalDelay int) (*CreateHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const service = "AWSMechanicalTurkRequester"
 	const operation = "CreateHIT"
@@ -285,6 +285,52 @@ func CreateTranslationHIT(a *anaconda.TwitterApi, tweetId int64, title string, d
 	return resp, err
 }
 
+func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
+
+	title := `Translate tweet into emoji`
+	description := `Pick the emoji that you feel would be the best translation of this tweet.`
+	displayName := "How would you translate this tweet?"
+	hit, err := CreateTranslationHIT(twitterBot, tweet.Id, title, description, displayName, "0.15", 120, LIFETIME, HIT_KEYWORDS, 0)
+	if err != nil {
+		log.Printf("ERROR creating translation HIT: %s", err)
+	}
+
+	// Check every minute for the completed task
+	hitId := hit.HIT.HITId
+	t := time.NewTicker(time.Minute)
+	timeout := make(chan bool, 1)
+	go func() {
+		time.After(LIFETIME)
+		timeout <- true
+	}()
+	for {
+		select {
+		case <-t.C:
+			result, err := GetAssignmentsForHITOperation(hitId)
+			if err != nil {
+				log.Printf("ERROR fetching assignments for HITOperation %s", hitId)
+			}
+			answerText, err := result.GetAnswerText()
+			if err != nil {
+				log.Printf("ERROR getting text of response for HITOperation %s", hitId)
+			}
+			if answerText == "" {
+				continue
+			}
+			v := url.Values{}
+			v.Set("in_reply_to_status_id", tweet.Id_str)
+			err = twitterBot.PostTweet(fmt.Sprintf("%s %s", *tweet.User.Screen_name, answerText), v)
+			if err != nil {
+				log.Printf("ERROR updating tweet %s: %s", tweet.Id_str, err)
+			}
+
+		case <-timeout:
+			return
+		}
+	}
+
+}
+
 func main() {
 
 	if tmp, err := aws.EnvAuth(); err != nil {
@@ -293,50 +339,26 @@ func main() {
 		awsAuth = &tmp
 	}
 
-	result, err := GetAssignmentsForHITOperation("2PT727M0IGFKLQJN01JVN4VIHW2EZH")
+	anaconda.SetConsumerKey(string(TWITTER_CONSUMER_KEY))
+	anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
+	twitterBot = anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
+
+	me, err := twitterBot.GetSelf(nil)
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Result is %+v", result)
+	log.Printf("me is %s", me.Id)
 
-	return
-
-	/**
-		anaconda.SetConsumerKey(string(TWITTER_CONSUMER_KEY))
-		anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
-		twitterBot = anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
-
-		title := `Translate tweet into emoji`
-		description := `Pick the emoji that you feel would be the best translation of this tweet.`
-		displayName := "How would you translate this tweet?"
-
-		resp, err := CreateTranslationHIT(twitterBot, 412631000544333824, title, description, displayName, "0.15", 120, 1200, HIT_KEYWORDS, 0)
-
-		if err != nil {
-			panic(err)
+	for {
+		tweets, _ := twitterBot.GetHomeTimeline()
+		for _, tweet := range tweets {
+			if t, _ := tweet.CreatedAtTime(); time.Now().Add(-8*time.Hour).Before(t) && *tweet.User.Id != *me.Id {
+				log.Printf("Scheduling response to tweet %s", tweet.Text)
+				go ScheduleTranslatedTweet(tweet)
+			}
 		}
 
-		hitId := resp.HIT.HITId
-		log.Print(resp)
-		log.Printf("hitId is %s", hitId)
-
-		<-time.After(5 * time.Second)
-
-		// TODO expand this to work for more than 100 simultaneous outstanding tasks
-		//hitsSearch, err := mt.SearchHITs()
-	    **/
-	hitId := "asdf"
-	hitsSearch, err := SearchHIT(nil)
-	if err != nil {
-		panic(err)
+		//TODO remove this
+		return
 	}
-	for _, hit := range hitsSearch.HIT {
-		if hit.HITId == hitId {
-			log.Printf(">>>>>>Status of HIT %s is %s", hitId, hit.NumberOfAssignmentsCompleted)
-		} else {
-			log.Printf("Received %v\n", hit)
-		}
-	}
-	log.Printf("Length is %d", len(hitsSearch.HIT))
-	log.Printf("Received %+v", hitsSearch)
 }

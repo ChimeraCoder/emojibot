@@ -213,11 +213,22 @@ type GetAssignmentsForHITResponse struct {
 	GetAssignmentsForHITResult GetAssignmentsForHITResult
 }
 
+// GetAnswer will unmarshal the string Answer into a native Go struct
+// (This cannot be done at the same time that the parent struct is unmarshaled)
 func (r GetAssignmentsForHITResponse) GetAnswer() (*QuestionFormAnswers, error) {
 	tmp := r.GetAssignmentsForHITResult.Assignment.Answer
 	var result QuestionFormAnswers
 	err := xml.Unmarshal([]byte(tmp), &result)
 	return &result, err
+}
+
+func (r GetAssignmentsForHITResponse) GetAnswerText() (result string, err error) {
+	qfa, err := r.GetAnswer()
+	if err != nil {
+		return
+	}
+	result = qfa.Answer.FreeText
+	return
 }
 
 type GetAssignmentsForHITResult struct {
