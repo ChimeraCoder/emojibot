@@ -1,12 +1,27 @@
 package main
 
 import (
-    "github.com/ChimeraCoder/anaconda"
-    "encoding/xml"
-    "fmt"
-    "io/ioutil"
-    "bytes"
+	"bytes"
+	"encoding/xml"
+	"fmt"
+	"github.com/ChimeraCoder/anaconda"
+	"io/ioutil"
 )
+
+type Notification struct {
+	XMLName     xml.Name `xml:"Notification"`
+	Destination string
+	Transport   string
+	Version     string
+	EventType   string
+}
+
+type SetHITTypeNotificationResponse struct {
+	XMLName xml.Name `xml:"SetHITTypeNotificationResponse"`
+	Request struct {
+		IsValid bool
+	}
+}
 
 type HTMLQuestion struct {
 	XMLName     xml.Name            `xml:"HTMLQuestion"`
@@ -172,3 +187,51 @@ type SearchHITsResponse struct {
 	}
 }
 
+type ReceiveMessageResponse struct {
+	XMLName              xml.Name `xml:"ReceiveMessageResponse"`
+	ReceiveMessageResult struct {
+		Message struct {
+			MessageId     string
+			ReceiptHandle string
+			MD5OfBody     string
+			Body          string
+			Attribute     []struct {
+				Name  string
+				Value string
+			}
+		}
+	}
+	ResponseMetadata struct {
+		RequestId string
+	}
+}
+
+type GetAssignmentsForHITResult struct {
+	XMLName xml.Name `xml:"GetAssignmentsForHITResult"`
+	Request struct {
+		IsValid bool
+	}
+	NumResults      int
+	TotalNumResults int
+	PageNumber      int
+	Assignment      struct {
+		AssignmentId     string
+		WorkerId         string
+		HITId            string
+		AssignmentStatus string
+		AutoApprovalTime string
+		AcceptTime       string
+		SubmitTime       string
+		ApprovalTime     string
+		Answer           QuestionFormAnswers
+	}
+}
+
+type QuestionFormAnswers struct {
+	XMLName xml.Name `xml:"QuestionFormAnswers"`
+	Xmlns   string   `xml:"xmlns,attr"`
+	Answer  struct {
+		QuestionIdentifier string
+		FreeText           string
+	}
+}
