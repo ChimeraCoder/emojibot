@@ -206,6 +206,20 @@ type ReceiveMessageResponse struct {
 	}
 }
 
+type GetAssignmentsForHITResponse struct {
+	XMLName                    xml.Name `xml:"GetAssignmentsForHITResponse"`
+	OperationRequest           string
+	RequestId                  string
+	GetAssignmentsForHITResult GetAssignmentsForHITResult
+}
+
+func (r GetAssignmentsForHITResponse) GetAnswer() (*QuestionFormAnswers, error) {
+	tmp := r.GetAssignmentsForHITResult.Assignment.Answer
+	var result QuestionFormAnswers
+	err := xml.Unmarshal([]byte(tmp), &result)
+	return &result, err
+}
+
 type GetAssignmentsForHITResult struct {
 	XMLName xml.Name `xml:"GetAssignmentsForHITResult"`
 	Request struct {
@@ -223,7 +237,7 @@ type GetAssignmentsForHITResult struct {
 		AcceptTime       string
 		SubmitTime       string
 		ApprovalTime     string
-		Answer           QuestionFormAnswers
+		Answer           string
 	}
 }
 

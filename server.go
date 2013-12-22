@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/xml"
+	"fmt"
 	"github.com/ChimeraCoder/anaconda"
 	"io/ioutil"
 	"launchpad.net/goamz/aws"
@@ -79,7 +80,7 @@ func sign2(auth aws.Auth, method, path string, params url.Values, host string) {
 	params.Set("Signature", string(signature))
 }
 
-func GetAssignmentsForHITOperation(hitID string) (*GetAssignmentsForHITResult, error) {
+func GetAssignmentsForHITOperation(hitID string) (*GetAssignmentsForHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const OPERATION = "GetAssignmentsForHIT"
 	const service = "AWSMechanicalTurkRequester"
@@ -100,12 +101,16 @@ func GetAssignmentsForHITOperation(hitID string) (*GetAssignmentsForHITResult, e
 		return nil, err
 	}
 
-	var result GetAssignmentsForHITResult
+	log.Printf("Amazon returned %+v", string(bts))
+	var result GetAssignmentsForHITResponse
 	err = xml.Unmarshal(bts, &result)
 	if err != nil {
 		return nil, err
 	}
-	return &result, nil
+	if !result.GetAssignmentsForHITResult.Request.IsValid {
+		return &result, fmt.Errorf("Request invalid or unmarshalling failed")
+	}
+	return &result, err
 }
 
 // Create an HIT
@@ -288,37 +293,39 @@ func main() {
 		awsAuth = &tmp
 	}
 
-	result, err := ReceiveMessage()
+	result, err := GetAssignmentsForHITOperation("2PT727M0IGFKLQJN01JVN4VIHW2EZH")
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Result was %+v", result)
-	log.Printf("ReceiveMessageResult %+v", result.ReceiveMessageResult.Message.Body)
+	log.Printf("Result is %+v", result)
 
 	return
 
-	anaconda.SetConsumerKey(string(TWITTER_CONSUMER_KEY))
-	anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
-	twitterBot = anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
+	/**
+		anaconda.SetConsumerKey(string(TWITTER_CONSUMER_KEY))
+		anaconda.SetConsumerSecret(string(TWITTER_CONSUMER_SECRET))
+		twitterBot = anaconda.NewTwitterApi(string(TWITTER_ACCESS_TOKEN), string(TWITTER_ACCESS_TOKEN_SECRET))
 
-	title := `Translate tweet into emoji`
-	description := `Pick the emoji that you feel would be the best translation of this tweet.`
-	displayName := "How would you translate this tweet?"
+		title := `Translate tweet into emoji`
+		description := `Pick the emoji that you feel would be the best translation of this tweet.`
+		displayName := "How would you translate this tweet?"
 
-	resp, err := CreateTranslationHIT(twitterBot, 412631000544333824, title, description, displayName, "0.15", 120, 1200, HIT_KEYWORDS, 0)
+		resp, err := CreateTranslationHIT(twitterBot, 412631000544333824, title, description, displayName, "0.15", 120, 1200, HIT_KEYWORDS, 0)
 
-	if err != nil {
-		panic(err)
-	}
+		if err != nil {
+			panic(err)
+		}
 
-	hitId := resp.HIT.HITId
-	log.Print(resp)
-	log.Printf("hitId is %s", hitId)
+		hitId := resp.HIT.HITId
+		log.Print(resp)
+		log.Printf("hitId is %s", hitId)
 
-	<-time.After(5 * time.Second)
+		<-time.After(5 * time.Second)
 
-	// TODO expand this to work for more than 100 simultaneous outstanding tasks
-	//hitsSearch, err := mt.SearchHITs()
+		// TODO expand this to work for more than 100 simultaneous outstanding tasks
+		//hitsSearch, err := mt.SearchHITs()
+	    **/
+	hitId := "asdf"
 	hitsSearch, err := SearchHIT(nil)
 	if err != nil {
 		panic(err)
@@ -327,7 +334,7 @@ func main() {
 		if hit.HITId == hitId {
 			log.Printf(">>>>>>Status of HIT %s is %s", hitId, hit.NumberOfAssignmentsCompleted)
 		} else {
-			log.Printf("Received %v", hit)
+			log.Printf("Received %v\n", hit)
 		}
 	}
 	log.Printf("Length is %d", len(hitsSearch.HIT))
