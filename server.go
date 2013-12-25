@@ -206,7 +206,7 @@ func SearchHIT(v url.Values) (*SearchHITsResponse, error) {
 	return &result, nil
 }
 
-func CreateTranslationHIT(a *anaconda.TwitterApi, tweetId int64, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*CreateHITResponse, error) {
+func CreateTranslationHIT(a *anaconda.TwitterApi, tweet anaconda.Tweet, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*CreateHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const service = "AWSMechanicalTurkRequester"
 	const operation = "CreateHIT"
@@ -216,16 +216,12 @@ func CreateTranslationHIT(a *anaconda.TwitterApi, tweetId int64, title string, d
 
 	log.Print("About to request tweet")
 
-	tweet, err := a.GetTweet(tweetId, nil)
-	if err != nil {
-		return nil, err
-	}
-	embed, err := a.GetOEmbedId(tweetId, nil)
+	embed, err := a.GetOEmbedId(tweet.Id, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Print("Successfully obtained tweet")
+	log.Print("Successfully obtained embedded tweet")
 
 	hq := HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
 
@@ -238,7 +234,7 @@ func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
 	title := `Translate tweet into emoji`
 	description := `Pick the emoji that you feel would be the best translation of this tweet.`
 	displayName := "How would you translate this tweet?"
-	hit, err := CreateTranslationHIT(twitterBot, tweet.Id, title, description, displayName, REWARD, ASSIGNMENT_DURATION, LIFETIME, HIT_KEYWORDS)
+	hit, err := CreateTranslationHIT(twitterBot, tweet, title, description, displayName, REWARD, ASSIGNMENT_DURATION, LIFETIME, HIT_KEYWORDS)
 	if err != nil {
 		log.Printf("ERROR creating translation HIT: %s", err)
 	}
