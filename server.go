@@ -30,7 +30,6 @@ var (
 	TWITTER_CONSUMER_SECRET     = []byte(os.Getenv("TWITTER_CONSUMER_SECRET"))
 	TWITTER_ACCESS_TOKEN        = []byte(os.Getenv("TWITTER_ACCESS_TOKEN"))
 	TWITTER_ACCESS_TOKEN_SECRET = []byte(os.Getenv("TWITTER_ACCESS_TOKEN_SECRET"))
-	AWS_SQS_URL                 = os.Getenv("AWS_SQS_URL")
 
 	twitterBot *anaconda.TwitterApi
 	awsAuth    *aws.Auth
@@ -39,14 +38,12 @@ var (
 const (
 	QUESTION_FORM_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2005-10-01/QuestionForm.xsd"
 	HTML_QUESTION_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd"
-	FRAME_HEIGHT             = 100                // Frame height of the ExternalQuestion for MTurk, in pixels.
-	ASSIGNMENT_DURATION      = 300                // How long, in seconds, a worker has to complete the assignment
+	ASSIGNMENT_DURATION      = 600                // How long, in seconds, a worker has to complete the assignment
 	LIFETIME                 = 1200 * time.Second // How long, in seconds, before the task expires
 	MAX_ASSIGNMENTS          = 1                  // Number of times the task needs to be performed
 	AUTO_APPROVAL_DELAY      = 0                  // Seconds before the request is auto-accepted. Set to 0 to accept immediately
 	MAX_QUESTION_SIZE        = 65535
-	HITTYPE_ID               = "2KZXBAT2D5NQ20NW5CRJO5TYMZL26K"
-	REWARD                   = "0.15"
+	REWARD                   = "0.50"
 )
 
 func sign(auth aws.Auth, service, method, timestamp string, v url.Values) {
@@ -168,7 +165,6 @@ func CreateHIT(title string, description string, htmlQuestionContent HTMLQuestio
 func SetHITTypeNotification(hitTypeId string, notification Notification) (*SearchHITsResponse, error) {
 	const OPERATION = "SetHITTypeNotification"
 	const EVENT_TYPE = "AssignmentSubmitted"
-	//Notification{AWS_SQS_URL, "SQS", "2006-05-05", "AssignmentSubmitted"}
 	return nil, nil
 }
 
@@ -291,21 +287,22 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("me is %s", me.Id)
+	log.Printf("My Twitter userId is  %f", *me.Id)
 
 	for {
 		tweets, _ := twitterBot.GetHomeTimeline()
 		for _, tweet := range tweets {
-			if t, _ := tweet.CreatedAtTime(); time.Now().Add(-3*time.Hour).Before(t) && *tweet.User.Id != *me.Id {
+			// Don't reply to own tweets
+			// Only reply to tweets within the last 23 hours
+			// Amazon guarantees idempotency of requests with the same unique identifier for 24 hours
+			if t, _ := tweet.CreatedAtTime(); time.Now().Add(-23*time.Hour).Before(t) && *tweet.User.Id != *me.Id {
 				log.Printf("Scheduling response to tweet %s", tweet.Text)
 				go ScheduleTranslatedTweet(tweet)
 			}
+			log.Printf("Ignoring tweet %s", tweet.Text)
 		}
-
-		//TODO remove this
-		break
-	}
-	for {
-		<-time.After(time.Minute)
+		// TODO fix pagination
+		log.Printf("Finished scanning all tweets")
+		<-time.After(10 * time.Minute)
 	}
 }
