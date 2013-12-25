@@ -2,11 +2,173 @@ package main
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"github.com/ChimeraCoder/anaconda"
 	"io/ioutil"
+	"launchpad.net/goamz/aws"
+	"log"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"text/template"
+	"time"
 )
+
+const (
+	QUESTION_FORM_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2005-10-01/QuestionForm.xsd"
+	HTML_QUESTION_SCHEMA_URL = "http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd"
+)
+
+func executePostQuery(auth *aws.Auth, queryUrl, service, operation string, v url.Values, result interface{}) error {
+	sign(*awsAuth, service, operation, v)
+	resp, err := http.PostForm(queryUrl, v)
+	if err != nil {
+		return err
+	}
+	bts, err := ioutil.ReadAll(resp.Body)
+	log.Printf("Amazon returned %+v", string(bts))
+	if err != nil {
+		return err
+	}
+	return xml.Unmarshal(bts, &result)
+}
+
+func sign(auth aws.Auth, service, operation string, v url.Values) {
+	timestamp := time.Now().Format(time.RFC3339)
+	b64 := base64.StdEncoding
+	payload := service + operation + timestamp
+	hash := hmac.New(sha1.New, []byte(auth.SecretKey))
+	hash.Write([]byte(payload))
+	signature := make([]byte, b64.EncodedLen(hash.Size()))
+	b64.Encode(signature, hash.Sum(nil))
+	v.Set("Signature", string(signature))
+	v.Set("Operation", operation)
+	v.Set("Version", "2012-03-25")
+	v.Set("AWSAccessKeyId", awsAuth.AccessKey)
+	v.Set("Timestamp", timestamp)
+}
+
+// GetAssignmentsForHITOperation fetches the assignment details for the HIT with id hitID
+func GetAssignmentsForHITOperation(auth *aws.Auth, hitID string) (*GetAssignmentsForHITResponse, error) {
+	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
+	const OPERATION = "GetAssignmentsForHIT"
+	const SERVICE = "AWSMechanicalTurkRequester"
+	v := url.Values{}
+	v.Set("HITId", hitID)
+	var result GetAssignmentsForHITResponse
+	err := executePostQuery(auth, QUERY_URL, SERVICE, OPERATION, v, &result)
+	if err != nil {
+		return nil, err
+	}
+	if !result.GetAssignmentsForHITResult.Request.IsValid {
+		return &result, fmt.Errorf("Request invalid or unmarshalling failed")
+	}
+	return &result, err
+}
+
+// Create an HIT
+func CreateHIT(auth *aws.Auth, title string, description string, htmlQuestionContent HTMLQuestionContent, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime time.Duration, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
+	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
+	const SERVICE = "AWSMechanicalTurkRequester"
+	const OPERATION = "CreateHIT"
+
+	// TODO move this elsewhere
+	bs := make([]byte, 0, MAX_QUESTION_SIZE)
+	bf := bytes.NewBuffer(bs)
+	tmpl, err := template.New("foo").Parse(HTMLQuestionTemplate)
+	if err != nil {
+		panic(err)
+		return nil, err
+	}
+	err = tmpl.ExecuteTemplate(bf, "T", htmlQuestionContent)
+	if err != nil {
+		panic(err)
+		return nil, err
+	}
+
+	bts, err := ioutil.ReadAll(bf)
+	if err != nil {
+		panic(err)
+		return nil, err
+	}
+
+	v := url.Values{}
+	v.Set("Description", description)
+	v.Set("Title", title)
+	v.Set("Question", string(bts))
+	v.Set("LifetimeInSeconds", strconv.Itoa(int(lifetime.Seconds())))
+	v.Set("Reward.1.Amount", rewardAmount)
+	v.Set("Reward.1.CurrencyCode", rewardCurrencyCode)
+	v.Set("AssignmentDurationInSeconds", strconv.Itoa(assignmentDuration))
+	v.Set("Keywords", strings.Join(keywords, ","))
+	v.Set("AutoApprovalDelayInSeconds", strconv.Itoa(autoApprovalDelay))
+	v.Set("RequesterAnnotation", requesterAnnotation)
+	v.Set("UniqueRequestToken", uniqueRequestToken)
+	v.Set("ResponseGroup", responseGroup)
+
+	var result CreateHITResponse
+	err = executePostQuery(auth, QUERY_URL, SERVICE, OPERATION, v, &result)
+	if err != nil {
+		return nil, err
+	}
+	if !result.HIT.Request.IsValid {
+		err = fmt.Errorf("CreateHITResponse contained an invalid response")
+	}
+	return &result, err
+}
+
+func SearchHIT(v url.Values) (*SearchHITsResponse, error) {
+	const OPERATION = "SearchHITs"
+	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
+	const SERVICE = "AWSMechanicalTurkRequester"
+	if v == nil {
+		v = url.Values{}
+	}
+
+	sign(*awsAuth, SERVICE, OPERATION, v)
+
+	resp, err := http.PostForm(QUERY_URL, v)
+	if err != nil {
+		return nil, err
+	}
+	bts, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("Result was %s\n\n", string(bts))
+	var result SearchHITsResponse
+	err = xml.Unmarshal(bts, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda.Tweet, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*CreateHITResponse, error) {
+	const rewardCurrencyCode = "USD" // This is the only one supported for now by Amazon, anyway
+	const responseGroup = "Minimal"
+	const autoApprovalDelay = 0 // auto-approve immediately
+
+	log.Print("About to request tweet")
+
+	embed, err := a.GetOEmbedId(tweet.Id, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Print("Successfully obtained embedded tweet")
+
+	hq := HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
+
+	resp, err := CreateHIT(auth, title, description, hq, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
+	return resp, err
+}
 
 type Notification struct {
 	XMLName     xml.Name `xml:"Notification"`
@@ -54,41 +216,6 @@ type HTMLQuestionContent struct {
 	TweetEmbed   anaconda.OEmbed
 }
 
-const HTMLQuestionTemplate = `{{define "T"}}<HTMLQuestion xmlns="http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd">
-  <HTMLContent><![CDATA[
-<!DOCTYPE html>
-<html>
-<head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
-<script type="text/javascript" src="https://s3.amazonaws.com/mturk-public/externalHIT_v1.js"></script>
-</head>
-<body>
-<form name="mturk_form" method="post" id="mturk_form" action="https://www.mturk.com/mturk/externalSubmit">
-<input type="hidden" value="" name="{{.AssignmentId}}" id="{{.AssignmentId}}"/>
-<h2>{{.Title}}</h2>
-<div style="border: 2px #000000 solid">
-<h4>
-{{.TweetEmbed.Html}}
-</h4>
-</div>
-<div>
-Pick the emoji that you feel would be the best translation of this tweet. For example, if the tweet were
-
-<blockquote class="twitter-tweet" lang="en"><p>Call me Ishmael</p>&mdash; Aditya Mukerjee (@chimeracoder) <a href="https://twitter.com/chimeracoder/statuses/412631000544333824">December 16, 2013</a></blockquote>
-<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
-you might translate it as into the following emoji:
-    <img src="{{.ImageUrl}}">
-</div>
-<p><textarea name="comment" cols="80" rows="3"></textarea></p>
-<p><input type="submit" id="submitButton" value="Submit" /></p></form>
-<script language="Javascript">turkSetAssignmentID();</script>
-</body>
-</html>
-]]></HTMLContent>
-<FrameHeight>450</FrameHeight>
-</HTMLQuestion>{{end}}
-`
-
 type QuestionForm struct {
 	XMLName xml.Name `xml:"QuestionForm"`
 	Xmlns   string   `xml:"xmlns,attr"`
@@ -134,7 +261,6 @@ type FreeTextAnswer struct {
 }
 
 type Constraints struct {
-	//IsNumeric IsNumeric `xml:"IsNumeric"`
 	Length Length `xml:"Length"`
 }
 
