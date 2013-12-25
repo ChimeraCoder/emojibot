@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 )
 
@@ -72,35 +71,15 @@ func GetAssignmentsForHITOperation(auth *aws.Auth, hitID string) (*GetAssignment
 }
 
 // Create an HIT
-func CreateHIT(auth *aws.Auth, title string, description string, htmlQuestionContent HTMLQuestionContent, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime time.Duration, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
+func CreateHIT(auth *aws.Auth, title string, description string, questionContentString, rewardAmount string, rewardCurrencyCode string, assignmentDuration int, lifetime time.Duration, keywords []string, autoApprovalDelay int, requesterAnnotation string, uniqueRequestToken string, responseGroup string) (*CreateHITResponse, error) {
 	const QUERY_URL = "https://mechanicalturk.amazonaws.com/?Service=AWSMechanicalTurkRequester"
 	const SERVICE = "AWSMechanicalTurkRequester"
 	const OPERATION = "CreateHIT"
 
-	// TODO move this elsewhere
-	bs := make([]byte, 0, MAX_QUESTION_SIZE)
-	bf := bytes.NewBuffer(bs)
-	tmpl, err := template.New("foo").Parse(HTMLQuestionTemplate)
-	if err != nil {
-		panic(err)
-		return nil, err
-	}
-	err = tmpl.ExecuteTemplate(bf, "T", htmlQuestionContent)
-	if err != nil {
-		panic(err)
-		return nil, err
-	}
-
-	bts, err := ioutil.ReadAll(bf)
-	if err != nil {
-		panic(err)
-		return nil, err
-	}
-
 	v := url.Values{}
 	v.Set("Description", description)
 	v.Set("Title", title)
-	v.Set("Question", string(bts))
+	v.Set("Question", questionContentString)
 	v.Set("LifetimeInSeconds", strconv.Itoa(int(lifetime.Seconds())))
 	v.Set("Reward.1.Amount", rewardAmount)
 	v.Set("Reward.1.CurrencyCode", rewardCurrencyCode)
@@ -112,7 +91,7 @@ func CreateHIT(auth *aws.Auth, title string, description string, htmlQuestionCon
 	v.Set("ResponseGroup", responseGroup)
 
 	var result CreateHITResponse
-	err = executePostQuery(auth, QUERY_URL, SERVICE, OPERATION, v, &result)
+	err := executePostQuery(auth, QUERY_URL, SERVICE, OPERATION, v, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -148,26 +127,6 @@ func SearchHIT(v url.Values) (*SearchHITsResponse, error) {
 		return nil, err
 	}
 	return &result, nil
-}
-
-func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda.Tweet, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*CreateHITResponse, error) {
-	const rewardCurrencyCode = "USD" // This is the only one supported for now by Amazon, anyway
-	const responseGroup = "Minimal"
-	const autoApprovalDelay = 0 // auto-approve immediately
-
-	log.Print("About to request tweet")
-
-	embed, err := a.GetOEmbedId(tweet.Id, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Print("Successfully obtained embedded tweet")
-
-	hq := HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
-
-	resp, err := CreateHIT(auth, title, description, hq, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
-	return resp, err
 }
 
 type Notification struct {

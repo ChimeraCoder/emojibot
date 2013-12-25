@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/ChimeraCoder/anaconda"
+	"io/ioutil"
 	"launchpad.net/goamz/aws"
 	"log"
 	"net/url"
 	"os"
+	"text/template"
 	"time"
 )
 
@@ -68,6 +71,51 @@ you might translate it as into the following emoji:
 <FrameHeight>450</FrameHeight>
 </HTMLQuestion>{{end}}
 `
+
+func parseQuestionContent(htmlQuestionContent HTMLQuestionContent) (result string, err error) {
+	// TODO move this elsewhere
+	bs := make([]byte, 0, MAX_QUESTION_SIZE)
+	bf := bytes.NewBuffer(bs)
+	tmpl, err := template.New("foo").Parse(HTMLQuestionTemplate)
+	if err != nil {
+		return
+	}
+	err = tmpl.ExecuteTemplate(bf, "T", htmlQuestionContent)
+	if err != nil {
+		return
+	}
+	bts, err := ioutil.ReadAll(bf)
+	if err != nil {
+		return
+	}
+	result = string(bts)
+	return
+}
+
+func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda.Tweet, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*CreateHITResponse, error) {
+	const rewardCurrencyCode = "USD" // This is the only one supported for now by Amazon, anyway
+	const responseGroup = "Minimal"
+	const autoApprovalDelay = 0 // auto-approve immediately
+
+	log.Print("About to request tweet")
+
+	embed, err := a.GetOEmbedId(tweet.Id, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Print("Successfully obtained embedded tweet")
+
+	hq := HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
+
+	questionString, err := parseQuestionContent(hq)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := CreateHIT(auth, title, description, questionString, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
+	return resp, err
+}
 
 func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
 
