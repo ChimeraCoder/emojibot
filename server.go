@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/ChimeraCoder/anaconda"
+	"github.com/ChimeraCoder/mtwerk"
 	"io/ioutil"
 	"launchpad.net/goamz/aws"
 	"log"
@@ -72,7 +73,7 @@ you might translate it as into the following emoji:
 </HTMLQuestion>{{end}}
 `
 
-func parseQuestionContent(htmlQuestionContent HTMLQuestionContent) (result string, err error) {
+func parseQuestionContent(htmlQuestionContent mtwerk.HTMLQuestionContent) (result string, err error) {
 	// TODO move this elsewhere
 	bs := make([]byte, 0, MAX_QUESTION_SIZE)
 	bf := bytes.NewBuffer(bs)
@@ -92,7 +93,7 @@ func parseQuestionContent(htmlQuestionContent HTMLQuestionContent) (result strin
 	return
 }
 
-func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda.Tweet, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*CreateHITResponse, error) {
+func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda.Tweet, title string, description string, displayName string, rewardAmount string, assignmentDuration int, lifetime time.Duration, keywords []string) (*mtwerk.CreateHITResponse, error) {
 	const rewardCurrencyCode = "USD" // This is the only one supported for now by Amazon, anyway
 	const responseGroup = "Minimal"
 	const autoApprovalDelay = 0 // auto-approve immediately
@@ -106,14 +107,14 @@ func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda
 
 	log.Print("Successfully obtained embedded tweet")
 
-	hq := HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
+	hq := mtwerk.HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
 
 	questionString, err := parseQuestionContent(hq)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := CreateHIT(auth, title, description, questionString, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
+	resp, err := mtwerk.CreateHIT(auth, title, description, questionString, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
 	return resp, err
 }
 
@@ -136,7 +137,7 @@ func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
 		select {
 		case <-ticker.C:
 			log.Printf("Fetching assignments for HITOperation")
-			result, err := GetAssignmentsForHITOperation(awsAuth, hitId)
+			result, err := mtwerk.GetAssignmentsForHITOperation(awsAuth, hitId)
 			if err != nil {
 				log.Printf("ERROR fetching assignments for HITOperation %s: %s", hitId, err)
 			}
