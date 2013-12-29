@@ -180,7 +180,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("My Twitter userId is  %f", me.Id)
+	log.Printf("My Twitter userId is  %d", me.Id)
+	log.Printf("My Twitter username is  %d", me.ScreenName)
 
 	for {
 		tweets, _ := twitterBot.GetHomeTimeline()
