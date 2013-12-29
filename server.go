@@ -107,14 +107,14 @@ func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda
 
 	log.Print("Successfully obtained embedded tweet")
 
-	hq := mtwerk.HTMLQuestionContent{tweet.Id_str, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
+	hq := mtwerk.HTMLQuestionContent{tweet.IdStr, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
 
 	questionString, err := parseQuestionContent(hq)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := mtwerk.CreateHIT(auth, title, description, questionString, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.Id_str, tweet.Id_str, responseGroup)
+	resp, err := mtwerk.CreateHIT(auth, title, description, questionString, rewardAmount, rewardCurrencyCode, assignmentDuration, lifetime, keywords, autoApprovalDelay, tweet.IdStr, tweet.IdStr, responseGroup)
 	return resp, err
 }
 
@@ -151,10 +151,10 @@ func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
 			}
 			log.Printf("Received answerText %s", answerText)
 			v := url.Values{}
-			v.Set("in_reply_to_status_id", tweet.Id_str)
-			_, err = twitterBot.PostTweet(fmt.Sprintf("%s %s", *tweet.User.Screen_name, answerText), v)
+			v.Set("in_reply_to_status_id", tweet.IdStr)
+			_, err = twitterBot.PostTweet(fmt.Sprintf("%s %s", tweet.User.ScreenName, answerText), v)
 			if err != nil {
-				log.Printf("ERROR updating tweet %s: %s", tweet.Id_str, err)
+				log.Printf("ERROR updating tweet %s: %s", tweet.IdStr, err)
 			}
 
 		case <-timeout:
@@ -180,7 +180,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("My Twitter userId is  %f", *me.Id)
+	log.Printf("My Twitter userId is  %f", me.Id)
 
 	for {
 		tweets, _ := twitterBot.GetHomeTimeline()
@@ -188,7 +188,7 @@ func main() {
 			// Don't reply to own tweets
 			// Only reply to tweets within the last 23 hours
 			// Amazon guarantees idempotency of requests with the same unique identifier for 24 hours
-			if t, _ := tweet.CreatedAtTime(); time.Now().Add(-23*time.Hour).Before(t) && *tweet.User.Id != *me.Id {
+			if t, _ := tweet.CreatedAtTime(); time.Now().Add(-23*time.Hour).Before(t) && tweet.User.Id != me.Id {
 				log.Printf("Scheduling response to tweet %s", tweet.Text)
 				go ScheduleTranslatedTweet(tweet)
 			}
