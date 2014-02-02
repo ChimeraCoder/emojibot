@@ -4,6 +4,50 @@
 A Twitter bot that automatically translates your tweets into emoji, via the magic of Mechanical Turk.
 
 
+### Installation
+
+`emojibot` is go-get installable:
+
+`sh
+go get github.com/ChimeraCoder/emojibot
+`
+
+### Credentials
+
+You will need your AWS credentials:
+
+
+`sh
+export AWS_ACCESS_KEY_ID="your-access-key-id-goes-here"
+export AWS_SECRET_ACCESS_KEY="your-secret-access-key-goes-here"
+`
+
+You will also need Twitter application credentials
+
+`sh
+export TWITTER_CONSUMER_KEY="etc."
+export TWITTER_CONSUMER_SECRET="etc."
+`
+
+I would highly recommend using a dedicated Twitter account for posting the translations, unless the people you follow on Twitter really love emoji:
+
+`sh
+export TWITTER_ACCESS_TOKEN="access token for dedicated account"
+export TWITTER_ACCESS_TOKEN_SECRET="access token secret for dedicated account"
+`
+
+# Heroku
+
+Running `emojibot` on Heroku is easy. Create a Go application with 
+
+`sh
+heroku create -b https://github.com/kr/heroku-buildpack-go.git
+`
+
+and make sure you define the Heroku environment variables (`heroku config:add AWS_ACCESS_KEY_ID="etc."`)
+
+
+
 ####Acknowledgements
 Some credit (blame?) is due to emoji master Fred Benenson, editor of [Emoji Dick](http://www.emojidick.com/), whose emoji-riddled tweet inspired this creation: https://twitter.com/fredbenenson/status/407334322002493440
 
