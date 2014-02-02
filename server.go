@@ -34,10 +34,12 @@ const (
 	LIFETIME            = 1200 * time.Second // How long, in seconds, before the task expires
 	MAX_ASSIGNMENTS     = 1                  // Number of times the task needs to be performed
 	AUTO_APPROVAL_DELAY = 0                  // Seconds before the request is auto-accepted. Set to 0 to accept immediately
-	MAX_QUESTION_SIZE   = 65535
-	REWARD              = "0.50"
+	MAX_QUESTION_SIZE   = 65535              // Kilobytes
+	REWARD              = "0.50"             // In USD, represented as a string. "0.50" represents 50¢
+	//TODO use a command-line flag (or envvar) to set reward
 )
 
+// TODO move template to a separate file
 const HTMLQuestionTemplate = `{{define "T"}}<HTMLQuestion xmlns="http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd">
   <HTMLContent><![CDATA[
 <!DOCTYPE html>
@@ -98,14 +100,11 @@ func CreateTranslationHIT(a *anaconda.TwitterApi, auth *aws.Auth, tweet anaconda
 	const responseGroup = "Minimal"
 	const autoApprovalDelay = 0 // auto-approve immediately
 
-	log.Print("About to request tweet")
-
+	// Get the embedded tweet to render
 	embed, err := a.GetOEmbedId(tweet.Id, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	log.Print("Successfully obtained embedded tweet")
 
 	hq := mtwerk.HTMLQuestionContent{tweet.IdStr, title, description, "http://www.emojidick.com/emoji.png", tweet, embed}
 
@@ -133,7 +132,6 @@ func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
 	ticker := time.NewTicker(time.Minute)
 	timeout := time.After(LIFETIME)
 	for {
-		log.Printf("Re-entering for loop")
 		select {
 		case <-ticker.C:
 			log.Printf("Fetching assignments for HITOperation")
@@ -158,7 +156,7 @@ func ScheduleTranslatedTweet(tweet anaconda.Tweet) {
 			}
 
 		case <-timeout:
-			log.Printf("Timing out :(")
+			log.Printf("Timing out :( (tweet: %d)", tweet.Id)
 			return
 		}
 	}
@@ -180,8 +178,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("My Twitter userId is  %d", me.Id)
-	log.Printf("My Twitter username is  %d", me.ScreenName)
+
+	log.Printf("Emojibot posting as %s (%d)", me.ScreenName, me.Id)
 
 	for {
 		tweets, _ := twitterBot.GetHomeTimeline()
