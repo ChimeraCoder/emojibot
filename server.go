@@ -182,7 +182,7 @@ func main() {
 	log.Printf("Emojibot posting as %s (%d)", me.ScreenName, me.Id)
 
 	for {
-		tweets, _ := twitterBot.GetHomeTimeline()
+		tweets, _ := twitterBot.GetHomeTimeline(nil)
 		for _, tweet := range tweets {
 			// Don't reply to own tweets
 			// Only reply to tweets within the last 23 hours
