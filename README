@@ -52,3 +52,7 @@ and make sure you define the Heroku environment variables (`heroku config:add AW
 Some credit (blame?) is due to emoji master Fred Benenson, editor of [Emoji Dick](http://www.emojidick.com/), who inspired this creation with [an emoji-riddled tweet](https://twitter.com/fredbenenson/status/407334322002493440).
 
 
+
+######License
+
+Emojibot is provided under version 3 of the GNU Affero Public License. Details are provided in the LICENSE file.
